@@ -60,30 +60,74 @@ def clock():
     print("Conexões fechadas.")
     
 
-def emissor():
+def emissor(tarefas):
+    qtd_emitidas = 0
+    ##Socket para recebimento de clock
     s_em = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
     s_em.connect((HOST, porta_clock))
     
+    ##Socket para emissão de tarefas
+    s_tarefas = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s_tarefas.connect((HOST, porta_escalonador))
+    
     while True:
         clock = s_em.recv(8).decode()
+        if not clock:
+            print("Coneão encerrada!")
         print(f"Ciclo de clock: {clock} recebido no emissor!")
-        if clock == '4':
-            print("Fim: emissor")
+        
+        for id_tarefa, (tempo_ingresso, duracao, prioridade) in tarefas.items():
+            if tempo_ingresso == int(clock):
+                emitida = f"{id_tarefa};{tempo_ingresso};{duracao};{prioridade}"
+                s_tarefas.sendall(emitida.encode())
+                print(f"Tarefa {id_tarefa} emitida")
+                qtd_emitidas += 1
+                
+        if qtd_emitidas == len(tarefas):
+            print(tarefas)
+            print("Todas emitidas. Enviando sinal de fim ao escalonador...")
+            s_tarefas.sendall("fim".encode())
+            print("Mensagem enviada")
             break
     
 def escalonador():
-    s_es = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
-    s_es.connect((HOST, porta_clock))
+    ##Socket para recebimento de emissão de tarefas
+    fim = False
+    s_es_em = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
+    s_es_em.bind((HOST, porta_escalonador))
+    s_es_em.listen(1)
+    print("Escalonador aguardando conexão do emissor...")
+    conn_emissor, _ = s_es_em.accept()
+    print("Conectado ao emissor.")
+    conn_emissor.setblocking(False)
+    
+    ##socket para recebimento do clock
+    s_es_clock = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
+    s_es_clock.connect((HOST, porta_clock))
+    print("Conectado ao clock.")
 
     while True:
-        clock = s_es.recv(8).decode()
-        print(f"Ciclo de clock: {clock} recebido no escalonador!")
-        if clock == '4':
-            print("Fim: ESCALONADOR")
-            print("Enviando sinal de fim para clock...")
-            s_es.sendall(b"fim")
-            print("Sinal enviado!")
-            break
+        try:
+            clock = s_es_clock.recv(12).decode()
+            if not clock:
+                print("Conexão encerrada!")
+            print(f"Ciclo de clock: {clock} recebido no escalonador!")
+            
+            mensagem_emissor = conn_emissor.recv(1024).decode()
+            print(f"MENSAGEM DO EMISSOR: {mensagem_emissor}")
+            if "fim" in mensagem_emissor:
+                print("Recebimento de mensagem de fim de tarefas do emissor.")
+                fim = True
+                break
+            elif mensagem_emissor:
+                print(f"Tarefa recebida do emissor: {mensagem_emissor}")
+                print(f"Processando...")
+        except BlockingIOError:
+            pass
+        
+##FUNÇÕES DE ESCALONAMENTO    
+        
+        
 
 
 ##GLOBAIS##
@@ -101,17 +145,18 @@ if __name__ == "__main__":
     for tarefa in tarefas:
         tarefas[tarefa] = [int(x) for x in tarefas[tarefa]]
         
+        
     proc_clock = multiprocessing.Process(target=clock)
     time.sleep(0.500)
-    proc_emissor = multiprocessing.Process(target=emissor)
-    time.sleep(0.500)
     proc_escalonador = multiprocessing.Process(target=escalonador)
+    time.sleep(0.500)
+    proc_emissor = multiprocessing.Process(target=emissor, args=(tarefas,))
     
     proc_clock.start()
     time.sleep(0.500)
-    proc_emissor.start()
-    time.sleep(0.500)
     proc_escalonador.start()
+    time.sleep(0.500)
+    proc_emissor.start()
     
     
     proc_clock.join()
