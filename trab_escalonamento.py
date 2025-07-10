@@ -2,7 +2,7 @@ import time
 import socket
 import sys
 import multiprocessing
-import threading
+
 
 ##PORTAS PARA CONEXÃO DE SOCKETS
 HOST = "localhost"
@@ -36,12 +36,14 @@ def clock():
     while True:
         try:
             msg = conn_escalonador.recv(1024)
-            print(f"Recebendo mensagem de fim de {addr}...")
             if msg and msg.decode() == 'fim':
+                print(f"Recebendo mensagem de fim de {addr}...")
                 print("Fim de escalonamento")
                 break
         except BlockingIOError: #Se não há dados na msg de fim só continua o processo
             pass
+        except ConnectionAbortedError:
+            pass #Significa que existe uma mensagem, mas não é a de fim ainda.
         
         conn_emissor.sendall(str(ciclo).encode())
             
@@ -89,10 +91,24 @@ def emissor(tarefas):
             s_tarefas.sendall("fim".encode())
             print("Mensagem enviada")
             break
+    s_tarefas.setblocking(False)
+    while True:
+        clock = s_em.recv(8).decode()
+        try:
+            msg_fim = s_tarefas.recv(1024)
+            break
+        except BlockingIOError:
+            pass
+            
+        
+        
     
-def escalonador():
+    
+def escalonador(tipo_escalonamento):
     ##Socket para recebimento de emissão de tarefas
+    escalonada = ""
     fim = False
+    fila_prontos = {}
     s_es_em = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
     s_es_em.bind((HOST, porta_escalonador))
     s_es_em.listen(1)
@@ -114,29 +130,68 @@ def escalonador():
             print(f"Ciclo de clock: {clock} recebido no escalonador!")
             
             mensagem_emissor = conn_emissor.recv(1024).decode()
-            print(f"MENSAGEM DO EMISSOR: {mensagem_emissor}")
-            if "fim" in mensagem_emissor:
+            if "fim" in mensagem_emissor and not fim:
                 print("Recebimento de mensagem de fim de tarefas do emissor.")
                 fim = True
                 break
             elif mensagem_emissor:
                 print(f"Tarefa recebida do emissor: {mensagem_emissor}")
-                print(f"Processando...")
+                tarefa_info, id = normaliza_tarefa(mensagem_emissor)
+                fila_prontos[id] = tarefa_info
+                print(f"Processando tarefa {id}")
+                
+                match tipo_escalonamento:
+                    case "fcfs":
+                        pass
+                    case "rr":
+                        pass
+                    case "sjf":
+                        pass
+                    case "srtf":
+                        pass
+                    case "prioc":
+                        pass
+                    case "priop":
+                        pass
+                    case "priod":
+                        pass
+                    
+                #Quando termina de emitir mensagens ele manda os sinais de fim para o clock e para o emissor
+                s_es_em.sendall("fim".encode())
+                s_es_clock.sendall("fim".encode())
         except BlockingIOError:
             pass
-        
-##FUNÇÕES DE ESCALONAMENTO    
-        
-        
+
+
+##Funções auxiliares
+def normaliza_tarefa(tarefa_str: str):
+    tarefa_dict = {}
+    tarefa = tarefa_str.strip("\n").split(";")
+    tarefa_dict['ingresso'] = tarefa[1]
+    tarefa_dict['duracao'] = tarefa[2]
+    tarefa_dict['prioridade'] = tarefa[3]
+    tarefa_dict['finalizacao'] = None
+    tarefa_dict['turnaround'] = None
+    tarefa_dict['waiting_time'] = None
+    
+    return tarefa_dict, tarefa[0]
+    
+##FUNÇÕES DE ESCALONAMENTO
+def fcfs(clock, fila):
+    #REDUZ A DURACAO POR CICLO DE CLOCK, QUANDO CHEGA EM ZERO, A TAREFA TERMINOU, ENTÃO CALCULA TEMPOS DE TERMINO E ETC.
+    pass
 
 
 ##GLOBAIS##
 tarefas = {}
 algoritmo = ""
+algoritmos = ["fcfs", "rr", "sjf", "srtf", "prioc", "priop", "priod"]
 
 if __name__ == "__main__":
     nome_arq = sys.argv[1]
     algoritmo = sys.argv[2]
+    if algoritmo not in algoritmos:
+        raise ValueError("Algoritmo "+algoritmo+" invalido.")
     print(algoritmo)
     with open(nome_arq, "r") as arq:
         for linha in arq:
@@ -148,7 +203,7 @@ if __name__ == "__main__":
         
     proc_clock = multiprocessing.Process(target=clock)
     time.sleep(0.500)
-    proc_escalonador = multiprocessing.Process(target=escalonador)
+    proc_escalonador = multiprocessing.Process(target=escalonador, args=(algoritmo,))
     time.sleep(0.500)
     proc_emissor = multiprocessing.Process(target=emissor, args=(tarefas,))
     
